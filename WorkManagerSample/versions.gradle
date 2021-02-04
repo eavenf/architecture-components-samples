@@ -62,7 +62,11 @@ versions.rxjava2 = "2.1.3"
 versions.timber = "4.7.1"
 versions.transition = "1.3.0"
 versions.truth = "1.0.1"
+<<<<<<< HEAD
 versions.work = "2.4.0"
+=======
+versions.work = "2.5.0"
+>>>>>>> 4c606ccd83fded22a52d0d994b0cb043dafc6dd7
 ext.versions = versions
 
 def build_versions = [:]
