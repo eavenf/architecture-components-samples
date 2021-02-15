@@ -16,122 +16,76 @@
 
 package com.example.background
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ListenableWorker
 import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkContinuation
 import androidx.work.WorkManager
 import androidx.work.workDataOf
-import com.example.background.workers.BlurEffectFilterWorker
 import com.example.background.workers.CleanupWorker
-import com.example.background.workers.GrayScaleFilterWorker
 import com.example.background.workers.SaveImageToGalleryWorker
 import com.example.background.workers.UploadWorker
-import com.example.background.workers.WaterColorFilterWorker
+import com.example.background.workers.filters.BlurEffectFilterWorker
+import com.example.background.workers.filters.GrayScaleFilterWorker
+import com.example.background.workers.filters.WaterColorFilterWorker
 
 /**
  * Builds and holds WorkContinuation based on supplied filters.
  */
-internal class ImageOperations private constructor(val continuation: WorkContinuation) {
+@SuppressLint("EnqueueWork")
+internal class ImageOperations(
+    context: Context,
+    private val imageUri: Uri,
+    waterColor: Boolean = false,
+    grayScale: Boolean = false,
+    blur: Boolean = false,
+    save: Boolean = false,
+    upload: Boolean = false
+) {
 
-    internal class Builder(private val mContext: Context, private val mImageUri: Uri) {
-        private var mApplyWaterColor: Boolean = false
-        private var mApplyGrayScale: Boolean = false
-        private var mApplyBlur: Boolean = false
-        private var mApplySave: Boolean = false
-        private var mApplyUpload: Boolean = false
+    private lateinit var inputData: Data
+    val continuation: WorkContinuation
 
-        fun setApplyWaterColor(applyWaterColor: Boolean): Builder {
-            mApplyWaterColor = applyWaterColor
-            return this
+    init {
+        var tmpContinuation = WorkManager.getInstance(context)
+            .beginUniqueWork(
+                Constants.IMAGE_MANIPULATION_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                OneTimeWorkRequest.from(CleanupWorker::class.java)
+            )
+
+        if (waterColor) {
+            tmpContinuation = tmpContinuation.then(workRequest<WaterColorFilterWorker>())
+        }
+        if (grayScale) {
+            tmpContinuation = tmpContinuation.then(workRequest<GrayScaleFilterWorker>())
+        }
+        if (blur) {
+            tmpContinuation = tmpContinuation.then(workRequest<BlurEffectFilterWorker>())
+        }
+        if (save) {
+            tmpContinuation = tmpContinuation.then(workRequest<SaveImageToGalleryWorker>(true))
+        }
+        if (upload) {
+            tmpContinuation = tmpContinuation.then(workRequest<UploadWorker>(true))
         }
 
-        fun setApplyGrayScale(applyGrayScale: Boolean): Builder {
-            mApplyGrayScale = applyGrayScale
-            return this
-        }
-
-        fun setApplyBlur(applyBlur: Boolean): Builder {
-            mApplyBlur = applyBlur
-            return this
-        }
-
-        fun setApplySave(applySave: Boolean): Builder {
-            mApplySave = applySave
-            return this
-        }
-
-        fun setApplyUpload(applyUpload: Boolean): Builder {
-            mApplyUpload = applyUpload
-            return this
-        }
-
-        /**
-         * Creates the [WorkContinuation] depending on the list of selected filters.
-         *
-         * @return the instance of [WorkContinuation].
-         */
-        fun build(): ImageOperations {
-            var hasInputData = false
-            var continuation = WorkManager.getInstance(mContext)
-                .beginUniqueWork(
-                    Constants.IMAGE_MANIPULATION_WORK_NAME,
-                    ExistingWorkPolicy.REPLACE,
-                    OneTimeWorkRequest.from(CleanupWorker::class.java)
-                )
-
-            if (mApplyWaterColor) {
-
-                val waterColor = OneTimeWorkRequestBuilder<WaterColorFilterWorker>()
-                    .setInputData(createInputData())
-                    .build()
-                continuation = continuation.then(waterColor)
-                hasInputData = true
-            }
-
-            if (mApplyGrayScale) {
-                val grayScaleBuilder = OneTimeWorkRequestBuilder<GrayScaleFilterWorker>()
-                if (!hasInputData) {
-                    grayScaleBuilder.setInputData(createInputData())
-                    hasInputData = true
-                }
-                val grayScale = grayScaleBuilder.build()
-                continuation = continuation.then(grayScale)
-            }
-
-            if (mApplyBlur) {
-                val blurBuilder = OneTimeWorkRequestBuilder<BlurEffectFilterWorker>()
-                if (!hasInputData) {
-                    blurBuilder.setInputData(createInputData())
-                    hasInputData = true
-                }
-                val blur = blurBuilder.build()
-                continuation = continuation.then(blur)
-            }
-
-            if (mApplySave) {
-                val save = OneTimeWorkRequestBuilder<SaveImageToGalleryWorker>()
-                    .setInputData(createInputData())
-                    .addTag(Constants.TAG_OUTPUT)
-                    .build()
-                continuation = continuation.then(save)
-            }
-
-            if (mApplyUpload) {
-                val upload = OneTimeWorkRequestBuilder<UploadWorker>()
-                    .setInputData(createInputData())
-                    .addTag(Constants.TAG_OUTPUT)
-                    .build()
-                continuation = continuation.then(upload)
-            }
-            return ImageOperations(continuation)
-        }
-
-        private fun createInputData(): Data {
-            return workDataOf(Constants.KEY_IMAGE_URI to mImageUri.toString())
-        }
+        continuation = tmpContinuation
     }
+
+    private inline fun <reified T : ListenableWorker> workRequest(shouldOutput: Boolean = false) =
+        OneTimeWorkRequestBuilder<T>().apply {
+            if (!::inputData.isInitialized) {
+                inputData = workDataOf(Constants.KEY_IMAGE_URI to imageUri.toString())
+                setInputData(inputData)
+            }
+            if (shouldOutput) {
+                addTag(Constants.TAG_OUTPUT)
+            }
+        }.build()
 }
